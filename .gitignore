@@ -1,3 +1,9 @@
+# Project specific files
+cfg/
+img/
+*.zip
+*.png
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
