@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 from sklearn import svm
+import math
+import matplotlib.pyplot as plt
 
 WEIGHTS_FILE = "cfg/yolov3.weights"
 CONFIG_FILE = "cfg/yolov3.cfg"
@@ -108,44 +110,32 @@ def mask(img):
 	mask = cv2.dilate(mask, kernel, iterations=7)
 	img = cv2.bitwise_and(img, img, mask=cv2.bitwise_not(mask))
 	return img
-"""
-	k = 3
 
-	criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 200, .1)
-	flags = cv2.KMEANS_RANDOM_CENTERS
-	_, labels, centroids = cv2.kmeans(pixels, k, None, criteria, 10, flags)
+def color_extraction(img, k=5, return_labels=False):
 
-	palette = np.uint8(centroids)
-	quantized = palette[labels.flatten()]
-	quantized = quantized.reshape(fist.shape)
-
-	#dominantColor = palette[np.argmax(itemfreq(labels)[:, -1])]
-
-"""
-def color_extraction(img):
-	k = 5
-	criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 200, .1)
-	flags = cv2.KMEANS_RANDOM_CENTERS
-	img = img.reshape(img.shape[0]*img.shape[1], 3)
+	if len(img.shape) == 3:
+		# print("AHH")
+		img = img.reshape(img.shape[0]*img.shape[1], img.shape[2])
 	# print(img.shape)
-	_, labels, centroids = cv2.kmeans(img, k, None, criteria, 10, flags)
-	# print(centroids)
-	# print(labels, labels.shape)
+	criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 200, .1)
+	flags = cv2.KMEANS_RANDOM_CENTERS
+
+	_, labels, centroids = cv2.kmeans(np.float32(img), k, None, criteria, 10, flags)
 
 	quantized = np.bincount(labels.flatten())
-	# quantized = quantized.reshape(img.shape)
-	# print(quantized)
-	# input()
 
-	# print(centroids[quantized.bincount()])
-
+	if return_labels:
+		return labels
 	return centroids[quantized.argsort()[::-1]]
-
 
 
 def assign_teams(img, boxes):
 	img = mask(img)
 	colors = [None] * len(boxes)
+	minX = None
+	minY = None
+	maxX = 0
+	maxY = 0
 	for i in range(len(boxes)):
 		x, y, w, h = boxes[i]
 		cv2.imwrite("%d.png" % i, img[y:y+h,x:x+w])
@@ -154,12 +144,36 @@ def assign_teams(img, boxes):
 		color.remove(min(color, key=lambda c: np.sum(c)))
 		# color = list(filter(lambda c: np.sum(c) > 30, color))
 		# assert len(color) == 2
+		if not minX:
+			minX = x + w/2
+		if not minY:
+			minY = y + h/2
+		minX = min(minX, x + w/2)
+		minY = min(minY, y + y/2)
+		maxX = max(maxX, x + w/2)
+		maxY = max(maxY, y + h/2)
+
+		boxes[i] = (x + w/2, y + h/2)
 		colors[i] = ((x + w/2, y + h/2), color)
 	
+	maxX -= minX
+	maxY -= minY
+
+	for i in range(len(boxes)):
+		x, y = boxes[i]
+		x = ((x - minX) / maxX - 0.5) * 2
+		y = ((y - minY) / maxY - 0.5) * 2
+
+		boxes[i] = (x, y)
 	# print(colors)
 	# input()
-	
-	return colors # for now
+
+	primary_colors = np.asarray([(np.array(color[0]) / 255).tolist() + [position[0] / 1000, position[1] / 1000] for position, color in colors])
+	assignments = color_extraction(primary_colors, k=2, return_labels=True)
+	# print(np.bincount(assignments.flatten()))
+	# input()
+	# res = [None] * len(boxes)
+	return list(zip(boxes, assignments.flatten().tolist())) # for now
 	
 def get_line(teams):
 	# teams should have 0 or 1 labels, not colors, at this stage
@@ -169,13 +183,24 @@ def get_line(teams):
 		X.append(teams[i][0])
 		y.append(teams[i][1])
 
-	svc = svm.svc(kernel='linear').fit(np.array(X), np.array(y))
-	W = svc.coef[0]
+	svc = svm.SVC(kernel='linear').fit(np.array(X), np.array(y))
+	W = svc.coef_[0]
 	I = svc.intercept_
-	return (W, I)
+	slope = -W[0]/W[1]
+	#b = -I[0]/W[1]
+	return slope, I
 
-def transform_coordinates(teams, a, b):
-	pass
+def transform_coordinates(teams, slope, intercept):
+	newCoords = []
+	theta = math.atan(slope)
+	for i in range(len(teams)):
+		x, y = teams[i][0]
+		newX = math.cos(-theta) * x - math.sin(theta) * y
+		newY = math.sin(theta) * x + math.cos(-theta) * y
+		#newX = (1 / math.sqrt(1 + slope**2)) * x + (-1 / math.sqrt(1 + (1/slope)**2)) * y
+		#newY = (slope / math.sqrt(1 + slope**2)) * x + (slope / mat.sqrt(1 + (1/slope)**2)) * y
+		newCoords.append(((newX, newY), teams[i][1]))
+	return newCoords
 
 
 if __name__ == "__main__":
@@ -187,18 +212,114 @@ if __name__ == "__main__":
 	boxes = yolo_net.predict(img)
 
 	teams = assign_teams(img, boxes)
+	slope, intercept = get_line(teams)
+	print(intercept)
+	rotated, intercept = transform_coordinates(teams, slope, intercept)
+	print(intercept)
+
+
+	# plt.title("KNN - " + data + ": Euclidean Distance")
 	
+	X = []
+	Y = []
+	labels = []
+	for (x, y), label in rotated:
+		X.append(x)
+		Y.append(y)
+		labels.append(label)
+	
+	plt.scatter(X, Y, c=labels)
+	# plt.show()
+	# ax.plot(list(range(1, maxK + 1)), kNN_euc_loss, "g-", label="Testing Loss")
+	
+	plt.savefig("rotated.png")
+	plt.clf()
+
+	
+
+	# print(teams[0])
+	font = cv2.FONT_HERSHEY_PLAIN
+	color = yolo_net.colors[0]
+	for position, assignment in teams:
+		x, y = position
+		label = str(assignment)
+		cv2.putText(img, label, (int(x), int(y) + 30), font, 3, color, 3)
+	cv2.imwrite("labels.png", img)
+
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 	# for _, color in teams:
 	# print([color[0] for _, color in teams])
-	for i in range(2):
-		primary_colors = np.asarray([color[i] for _, color in teams])
-		summation = np.sum(primary_colors, axis=1)
-		# print(summation)
-		primary_colors = primary_colors[summation.argsort()]
+	# for i in range(1):
+	# 	primary_colors = np.asarray([(np.array(color[i]) / 255).tolist() +[position[0] / 1000, position[1] / 1000] for position, color in teams])
+	# 	# print(primary_colors.shape)
+	# 	assignments = color_extraction(primary_colors, k=2, return_labels=True)
+	# 	print(assignments)
+		# print(np.bincount(color_extraction(primary_colors, k=2, return_labels=True).flatten()))
+		# summation = np.sum(primary_colors, axis=1)
+		# # print(summation)
+		# primary_colors = primary_colors[summation.argsort()]
+# (np.array(color[i]) / 255).tolist() +
 
-
-		cv2.imwrite("sorted_colors_%d.png" % i, np.array([np.repeat(np.array(primary_colors), 20, axis=0).flatten()]).repeat(20, axis=0).reshape(20, -1, 3))
+		# cv2.imwrite("sorted_colors_%d.png" % i, np.array([np.repeat(np.array(primary_colors), 20, axis=0).flatten()]).repeat(20, axis=0).reshape(20, -1, 3))
 
 	# for a in primary_colors:
 		# print(np.sum(a), a)
+	
+
 	
