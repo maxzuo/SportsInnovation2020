@@ -106,22 +106,27 @@ class YOLO(object):
 			# cv2.rectangle(img, (x, y), (x + w, y + h), color, 2)
 			# cv2.putText(img, label, (x, y + 30), font, 3, color, 3)
 
-		cv2.imwrite("result.png", img)
+		# cv2.imwrite("result.png", img)
 		return np.array(boxes)
 
-def mask(img):
+def mask(img, return_mask=False):
 	lower_green = np.array([40,40, 40])
-	upper_green = np.array([100, 255, 255])
+	upper_green = np.array([150, 255, 255])
 
 	mask = cv2.inRange(img, lower_green, upper_green)
 
 	kernel = np.ones((5, 5))
 	mask = cv2.erode(mask, kernel, iterations=5)
 	mask = cv2.dilate(mask, kernel, iterations=7)
+
+	if return_mask:
+		return mask
+
 	img = cv2.bitwise_and(img, img, mask=cv2.bitwise_not(mask))
+	
 	return img
 
-def kmeans(img, k=5, return_labels=False, restarts = 15):
+def kmeans(img, k=3, return_labels=False, restarts = 15):
 
 	if len(img.shape) == 3:
 		img = img.reshape(img.shape[0]*img.shape[1], img.shape[2])
@@ -138,9 +143,12 @@ def kmeans(img, k=5, return_labels=False, restarts = 15):
 	return centroids[quantized.argsort()[::-1]]
 
 
-def assign_teams(img, boxes):
+def assign_teams(img, boxes, masked=None):
 	start = datetime.now()
-	img = mask(img)
+	if masked is None:
+		img = mask(img)
+	else:
+		img = masked
 	print("Mask:", datetime.now() - start)
 	start = datetime.now()
 	colors = [None] * len(boxes)
@@ -164,11 +172,15 @@ def assign_teams(img, boxes):
 	X = np.zeros((len(boxes,)))
 	Y = np.zeros((len(boxes,)))
 	positions = [None] * len(boxes)
+	primaries = []
+	secondaries = []
 
 	for i in range(len(boxes)):
 		x, y, w, h = boxes[i]
-		# cv2.imwrite("%d.png" % i, img[y:y+h,x:x+w])
-		color = kmeans(np.float32(cv2.resize(img[y:y+h,x:x+w], None,fx=.1, fy=1.0), restarts=10))
+		# img[y:y+h,x:x+w]
+		cv2.imwrite("img/%d.png" % i,img[y:y+h,x+int(0.4*w):x+int(0.6*w)])
+		print(x+w//2, x+w//2 + 2)
+		color = kmeans(np.float32(cv2.resize(img[y:y+h,x+w//2:x+w//2 + 2], None,fx=1.0, fy=1.0), restarts=10))
 		
 		# line below for higher accuracy
 		# color = kmeans(np.float32(img[y:y+h,x:x+w]), restarts=10))
@@ -183,7 +195,13 @@ def assign_teams(img, boxes):
 		X[i] = x
 		Y[i] = y
 		positions[i] = [x, y]
-		colors[i] = np.concatenate([np.asarray(color[0]) / 255, np.asarray([x, y])])
+		colors[i] = np.concatenate([np.asarray(color[0]) / 255,np.asarray(color[1]) / 255, np.asarray([0, 0])])
+		primaries.append(color[0])
+		secondaries.append(color[1])
+	
+	cv2.imwrite("sorted_colors.png", np.array([np.repeat(np.array(primaries), 20, axis=0).flatten()]).repeat(20, axis=0).reshape(20, -1, 3))
+	secondaries.sort(key=lambda a: np.sum(a))
+	cv2.imwrite("sorted_colors_1.png", np.array([np.repeat(np.array(secondaries), 20, axis=0).flatten()]).repeat(20, axis=0).reshape(20, -1, 3))
 	
 	
 	# print(colors)
@@ -199,7 +217,7 @@ def assign_teams(img, boxes):
 def get_line(X, labels):
 	# teams should have 0 or 1 labels, not colors, at this stage
 
-	svc = svm.SVC(kernel='linear', C=1).fit(X, labels)
+	svc = svm.SVC(kernel='linear', C=0.001).fit(X, labels)
 	W = svc.coef_[0]
 	I = svc.intercept_
 	slope = -W[0]/W[1]
@@ -223,7 +241,23 @@ if __name__ == "__main__":
 	print("YOLO finished", datetime.now() - start)
 	start = datetime.now()
 
-	X, Y, positions, labels = assign_teams(img, boxes)
+	# valueMask = np.array(np.array([0, 0, 255], dtype=np.uint8).reshape((1, 1, 3)))
+	# valueMask = valueMask.resize(img.shape[:-1])
+	hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+	cv2.imwrite("original_hsv.png", hsv)
+	# print(hsv)
+	hsv[:, :, 2] = 255
+	
+	cv2.imwrite("flattened_hsv.png", hsv)
+	newImg = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+
+	cv2.imwrite("flattened.png", newImg)
+
+	masked = mask(img, return_mask=True)
+	newImg = cv2.bitwise_and(newImg, newImg, mask=cv2.bitwise_not(masked))
+	cv2.imwrite("newImg.png", newImg)
+
+	X, Y, positions, labels = assign_teams(newImg, boxes)
 	print("Assigned teams", datetime.now() - start)
 	start = datetime.now()
 
@@ -234,6 +268,9 @@ if __name__ == "__main__":
 	start = datetime.now()
 	
 	
+
+
+	# PLOT RESULTS
 	plt.scatter(X, Y, c=labels)
 	# plt.plot(X, [intercept + slope * i for i in X], "b-", label="Line of Scrimmage")
 	# plt.show()
@@ -249,7 +286,7 @@ if __name__ == "__main__":
 	# print(assignments.flatten() - labels)
 	plt.scatter(X, Y, c=labels.flatten())
 	plt.plot(X, np.ones(X.shape) * intercept, "b-", label="Line of Scrimmage")
-	plt.savefig("rotated.png")
+	plt.savefig("rotated_1.png")
 	plt.clf()
 
 	
@@ -261,7 +298,7 @@ if __name__ == "__main__":
 	# 	x, y = position
 	# 	label = str(assignment)
 	# 	cv2.putText(img, label, (int(x), int(y) + 30), font, 3, color, 3)
-	# cv2.imwrite("labels.png", img)
+	cv2.imwrite("labels.png", img)
 
 	
 
