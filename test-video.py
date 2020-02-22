@@ -1,7 +1,7 @@
 from model import *
 from time import sleep
 
-stream = cv2.VideoCapture('./videos/720_football.mov')
+stream = cv2.VideoCapture('./videos/gatech.mp4')
 
 prev_frame = None
 averages = None
@@ -31,7 +31,7 @@ if __name__ == "__main__":
         #         cv2.imshow("play start", np.zeros(frame.shape))
         if not ret and averages is None:
             counter = 0
-            averages = moving_average(np.array(deltas[1:]), n=15)
+            averages = moving_average(np.array(deltas[1:]), n=30)
             # averages = np.log(averages)
             averages = np.sqrt(averages)
 
@@ -42,9 +42,10 @@ if __name__ == "__main__":
             plt.plot([0, len(averages)], [avg_diff, avg_diff], 'g')
             plt.plot([0, len(averages)], [avg_diff*0.8, avg_diff*0.8], 'g')
             plt.show()
-
+            # 0/0
             # stream.set(2, 0)
             break
+
         elif not ret:
             break
         frame = cv2.resize(frame, None, fx=0.5, fy=0.5)
@@ -61,7 +62,7 @@ if __name__ == "__main__":
         thresh = cv2.threshold(delta, 200, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
 
         # cv2.imshow('delta', thresh)
-        # cv2.imshow('frame',gray)
+        cv2.imshow('frame',gray)
         delt_score = np.sum(thresh)
         deltas.append(delt_score)
 
@@ -70,20 +71,20 @@ if __name__ == "__main__":
             break
         
     # find best moment
-    masked = (averages < avg_diff * 0.7).astype(int)
+    masked = (averages < avg_diff * 0.8).astype(int)
     # stream = cv2.VideoCapture("videos/720_football.mov")
     last = None
     for i in range(len(masked) - 1):
         # if not last is None and i < last + 30:
         #     continue
-        if masked[i] == 1:# and masked[i + 1] == 0:
+        if masked[i] == 1 and masked[i + 1] == 0:
             print(i)
             # print(stream.get(1))
             stream.set(1, i)
             ret, frame = stream.read()
             if not ret:
                 print(frame.shape)
-            cv2.imwrite("training_images/%d.png" % i, frame)
+            cv2.imwrite("training_images/last_%d.png" % i, frame)
             last = i
     
     # print(deltas)
