@@ -30,10 +30,17 @@ def mse(a, b):
 def save_img(img, orientation, rep=False):
     if orientation == "left":
         rev = "right"
-        y = np.array([1, 0, 0, 0]) # left, right, up, down
+        y = np.array([1, 0, 0, 0, 0]) # left, right, up, down
     elif orientation == "right":
         rev = "left"
-        y = np.array([0, 1, 0, 0])
+        y = np.array([0, 1, 0, 0, 0])
+    elif orientation == "up":
+        y = np.array([0, 0, 1, 0, 0])
+    elif orientation == "down":
+        y = np.array([0, 0, 0, 1, 0])
+    elif orientation == "ref":
+        y = np.array([0, 0, 0, 0, 1])
+    
     X.append(cv2.resize(img, (100, 100)))
     Y.append(y)
     assert len(X) == len(Y)
@@ -41,7 +48,7 @@ def save_img(img, orientation, rep=False):
         np.save(os.path.join(save_folder, "X.npy"), np.asarray(X))
         np.save(os.path.join(save_folder, "Y.npy"), np.asarray(Y))
         print("SAVED", len(X))
-    if not rep:
+    if not rep and (orientation == "right" or orientation == "left"):
         save_img(cv2.flip(img, 1), rev, rep=True)
 
 def process_images(folder, images):
@@ -87,12 +94,22 @@ def process_images(folder, images):
                 # min([mse(p, roi) for p, t in prev_tags])
             cv2.imshow("roi", roi)
             key = cv2.waitKeyEx(0)
-            if key == 2424832:
+            if key == "a":
                 prev_tags.append((roi, "left"))
                 save_img(roi, "left")
-            if key == 2555904:
+            if key == "d":
                 prev_tags.append((roi, "right"))
                 save_img(roi, "right")
+                # print("right")
+            if key == "w":
+                prev_tags.append((roi, "up"))
+                save_img(roi, "up")
+            if key == "d":
+                prev_tags.append((roi, "down"))
+                save_img(roi, "down")
+            if key == "dr":
+                prev_tags.append((roi, "ref"))
+                save_img(roi, "ref")
                 # print("right")
             if key == ord('q'):
                 break
