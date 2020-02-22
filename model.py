@@ -25,7 +25,7 @@ class YOLO(object):
 		
 		self.colors = np.random.uniform(0, 255, size=(len(self.classes), 3)) # probably not necesary
 
-	def predict(self, img):
+	def predict(self, img, p_class=0):
 		original = img
 		height, width, channels = original_shape = img.shape
 		#try HSV: did not work
@@ -47,7 +47,7 @@ class YOLO(object):
 				# print(detection)
 				scores = detection[4:]
 				class_id = np.argmax(scores)
-				if class_id != 0:
+				if class_id != p_class:
 					continue
 				# class_ids.add(class_id)
 
